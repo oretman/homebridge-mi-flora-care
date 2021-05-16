@@ -4,24 +4,21 @@ import {
   Service,
   Characteristic,
   CharacteristicValue,
-  Formats,
-  Perms,
-  Units,
   AccessoryPlugin,
   AccessoryConfig,
 } from 'homebridge';
-// import {Characteristic, Service, Perms, Formats, Units} from 'hap-nodejs';
+import {PlantSensor, plantSensorService} from './plantSensorService';
 import os from 'os';
 import fakegato from 'fakegato-history';
 import MiFlora from 'miflora';
+import {MiFloraDevice} from 'miflora/lib/miflora-device';
 
 const hostname = os.hostname();
-
-let HapCharacteristic: typeof Characteristic;
 
 export class MiFloraCareAccessory implements AccessoryPlugin {
     private readonly Service: typeof Service;
     private readonly Characteristic: typeof Characteristic;
+    private readonly PlantSensor: typeof PlantSensor;
 
     private readonly informationService: Service;
     private readonly batteryService: Service;
@@ -33,7 +30,7 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
     // eslint-disable-next-line  @typescript-eslint/no-explicit-any
     private readonly fakeGatoHistoryService: any;
 
-    private readonly plantSensorService: Service;
+    private readonly plantSensorService: PlantSensor;
 
     private readonly name: string;
     private readonly displayName: string;
@@ -61,7 +58,7 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
 
       this.Service = this.api.hap.Service;
       this.Characteristic = this.api.hap.Characteristic;
-      HapCharacteristic = this.api.hap.Characteristic;
+      this.PlantSensor = plantSensorService(this.api);
 
       // extract name from config
       this.name = config.name || 'MiFlora';
@@ -147,60 +144,13 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
      * @returns Service
      */
     private _createPlantService(): Service {
-      // moisture characteristic
-      class SoilMoisture extends this.Characteristic {
-            static readonly UUID: string = 'C160D589-9510-4432-BAA6-5D9D77957138';
-
-            constructor() {
-              super('SoilMoisture', SoilMoisture.UUID, {
-                format: Formats.UINT8,
-                unit: Units.PERCENTAGE,
-                maxValue: 100,
-                minValue: 0,
-                minStep: 0.1,
-                perms: [Perms.PAIRED_READ, Perms.NOTIFY],
-              });
-              this.value = this.getDefaultValue();
-            }
-      }
-
-      // fertility characteristic
-      class SoilFertility extends this.Characteristic {
-            static readonly UUID: string = '0029260E-B09C-4FD7-9E60-2C60F1250618';
-
-            constructor() {
-              super('SoilFertility', SoilFertility.UUID, {
-                format: Formats.UINT8,
-                maxValue: 10000,
-                minValue: 0,
-                minStep: 1,
-                perms: [Perms.PAIRED_READ, Perms.NOTIFY],
-              });
-              this.value = this.getDefaultValue();
-            }
-      }
-
-      // moisture sensor
-      class PlantSensor extends this.Service {
-            static UUID = '3C233958-B5C4-4218-A0CD-60B8B971AA0A';
-
-            constructor(displayName: string, subtype?: string) {
-              super(displayName, PlantSensor.UUID, subtype);
-              // Required Characteristics
-              this.addCharacteristic(SoilMoisture);
-              // Optional Characteristics
-              this.addOptionalCharacteristic(HapCharacteristic.CurrentTemperature);
-              this.addOptionalCharacteristic(SoilFertility);
-            }
-      }
-
-      const plantSensorService = new PlantSensor(this.name);
+      const plantSensorService = new this.PlantSensor(this.name);
 
       plantSensorService
-        .getCharacteristic(SoilMoisture)
+        .getCharacteristic(this.PlantSensor.SoilMoisture)
         .onGet(this.getCurrentMoisture.bind(this));
       plantSensorService
-        .getCharacteristic(SoilFertility)
+        .getCharacteristic(this.PlantSensor.SoilFertility)
         .onGet(this.getCurrentFertility.bind(this));
 
       return plantSensorService;
@@ -326,7 +276,9 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
     }
 
     private _createFakeGatoHistoryService(): Service {
-      return new fakegato(this.api)('room', this, {storage: 'fs'});
+      const FakeGatoHistory = fakegato(this.api);
+      const fakeGatoHistoryService = new FakeGatoHistory('room', this, {storage: 'fs'});
+      return fakeGatoHistoryService;
     }
 
     private _updateData({temperature, lux, moisture, fertility}) {
@@ -402,7 +354,7 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
       }
     }
 
-    private async _scan() {
+    private async _scan(): Promise<Array<MiFloraDevice>> {
       this.log.debug('[Flora] Scan ' + this._opts.addresses[0]);
       let resolve;
       const _waitScan = new Promise((_resolve) => {
@@ -417,7 +369,7 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
       } finally {
         this.log.debug('[Flora] End ' + this._opts.addresses[0]);
         if (resolve) {
-          resolve();
+          resolve([]);
         } else {
           this._waitScan = Promise.resolve();
         }
@@ -427,10 +379,11 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
 
     private async _refreshInfo() {
       this.log.debug('Mi Flora Care scan...');
-      const devices = await this._scan();
+      const devices: Array<MiFloraDevice> = await this._scan();
       if (devices.length) {
         try {
-          const data = await devices[0].query();
+          const device: MiFloraDevice = devices[0];
+          const data = await device.query();
           // {
           //     address: 'c4:7c:8d:6b:c9:2f',
           //     type: 'MiFloraMonitor',
