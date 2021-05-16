@@ -44,8 +44,9 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
     private lowLightAlertLevel = 0;
     private lowBatteryWarningLevel: number;
     // eslint-disable-next-line  @typescript-eslint/no-explicit-any
-    private _waitScan: Promise<any> = Promise.resolve();
+    private static _waitScan: Promise<any> = Promise.resolve();
     private _opts: { duration: number; ignoreUnknown: boolean; addresses: string[] };
+    private miFloraDevice: MiFloraDevice | undefined;
 
     constructor(
         public readonly log: Logger,
@@ -71,7 +72,7 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
       this._opts = {
         duration: 15000,
         ignoreUnknown: true,
-        addresses: [this.deviceId],
+        addresses: [this.deviceId.toLowerCase()],
       };
 
       if (config.humidityAlertLevel !== null && config.humidityAlertLevel !== undefined) {
@@ -354,27 +355,65 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
       }
     }
 
-    private async _scan(): Promise<Array<MiFloraDevice>> {
-      this.log.debug('[Flora] Scan ' + this._opts.addresses[0]);
-      let resolve;
-      const _waitScan = new Promise((_resolve) => {
-        resolve = _resolve;
-      });
-      try {
-        const _previousWaitScan = this._waitScan;
-        this._waitScan = _waitScan;
-        await _previousWaitScan;
-        this.log.debug('[Flora] Connect ' + this._opts.addresses[0]);
-        return MiFlora.discover(this._opts);
-      } finally {
-        this.log.debug('[Flora] End ' + this._opts.addresses[0]);
-        if (resolve) {
-          resolve([]);
-        } else {
-          this._waitScan = Promise.resolve();
-        }
-      }
+    private _scan(): Promise<Array<MiFloraDevice>> {
+      const discover = (address, opts): Promise<Array<MiFloraDevice>> => {
+        // try to discover 3 times
+        return new Promise((resolve) => {
+          setTimeout(async () => {
+            try {
+              this.log.debug(`Discover Start ${address}`);
+              const allDevices: Array<MiFloraDevice> = await MiFlora.discover(opts);
+              const devices: Array<MiFloraDevice> = allDevices.filter( device => device.address === address );
+              resolve(devices);
+            } catch (error) {
+              this.log.error(error);
+              resolve([]);
+            }
+            this.log.debug(`Discover End ${address}`);
+          }, 10 * 1000); // 10 sec
+        });
+      };
 
+      const scan = async (address, opts) => {
+        try {
+          this.log.debug(`Scan Start ${address}`);
+          let devices = await discover(address, opts);
+          if(devices.length === 0) {
+            devices = await discover(address, opts);
+          }
+          if(devices.length === 0) {
+            devices = await discover(address, opts);
+          }
+          this.log.debug(`Scan Got ${devices.length}`);
+          return devices;
+        } catch(error) {
+          this.log.error(error);
+          return [];
+        }
+      };
+
+      return new Promise((resolveScan) => {
+        MiFloraCareAccessory._waitScan = MiFloraCareAccessory._waitScan
+          .then( async () => {
+            const address = this._opts.addresses[0];
+            if (this.miFloraDevice) {
+              this.log.debug(`Scan Cache ${address}`);
+              resolveScan([this.miFloraDevice]);
+            } else {
+              const devices = await scan(address, this._opts);
+              if(devices.length) {
+                this.miFloraDevice = devices[0];
+              }
+              resolveScan(devices);
+            }
+
+            await new Promise( (resolve) => {
+              setTimeout( () => {
+                resolve(0);
+              }, 15 * 1000); // 15 sec;
+            });
+          });
+      });
     }
 
     private async _refreshInfo() {

@@ -22,8 +22,8 @@
         "type": "integer",
         "required": true,
         "default": 300,
-        "minimum": 1,
-        "maximum": 600
+        "minimum": 120,
+        "maximum": 3600
       },
       "humidityAlertLevel": {
         "title": "Humidity Alert Level",
