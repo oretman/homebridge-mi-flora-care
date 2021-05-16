@@ -1,5 +1,5 @@
-import { API, Logger, CharacteristicValue, AccessoryPlugin, AccessoryConfig } from 'homebridge';
-import { Characteristic, Service, Perms, Formats, Units } from 'hap-nodejs';
+import {API, Logger, CharacteristicValue, AccessoryPlugin, AccessoryConfig} from 'homebridge';
+import {Characteristic, Service, Perms, Formats, Units} from 'hap-nodejs';
 import os from 'os';
 import fakegato from 'fakegato-history';
 import MiFlora from 'miflora';
@@ -67,12 +67,14 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
     private readonly humidityService: Service;
     private readonly humidityAlertService: Service | null;
     private readonly lowLightAlertService: Service | null;
+    // eslint-disable-next-line  @typescript-eslint/no-explicit-any
     private readonly fakeGatoHistoryService: any;
     private readonly plantSensorService: Service;
 
     private readonly name: string;
     private readonly displayName: string;
     private readonly deviceId: string;
+    // eslint-disable-next-line  @typescript-eslint/no-explicit-any
     private storedData: any;
     private interval: number;
     private humidityAlert: boolean;
@@ -80,7 +82,7 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
     private lowLightAlert: boolean;
     private lowLightAlertLevel = 0;
     private lowBatteryWarningLevel: number;
-
+    // eslint-disable-next-line  @typescript-eslint/no-explicit-any
     private _waitScan: Promise<any> = Promise.resolve();
     private _opts: { duration: number; ignoreUnknown: boolean; addresses: string[] };
 
@@ -110,21 +112,24 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
         addresses: [this.deviceId],
       };
 
-      if (config.humidityAlertLevel != null) {
+      if (config.humidityAlertLevel !== null && config.humidityAlertLevel !== undefined) {
         this.humidityAlert = true;
         this.humidityAlertLevel = config.humidityAlertLevel;
       } else {
         this.humidityAlert = false;
       }
 
-      if (config.lowLightAlertLevel != null) {
+      if (config.lowLightAlertLevel !== null && config.lowLightAlertLevel !== undefined) {
         this.lowLightAlert = true;
         this.lowLightAlertLevel = config.lowLightAlertLevel;
       } else {
         this.lowLightAlert = false;
       }
 
-      if (config.lowBatteryWarningLevel != null && typeof config.lowBatteryWarningLevel === 'number') {
+      if (config.lowBatteryWarningLevel !== null
+            && config.lowBatteryWarningLevel !== undefined
+            && typeof config.lowBatteryWarningLevel === 'number'
+      ) {
         this.lowBatteryWarningLevel = config.lowBatteryWarningLevel;
       } else {
         this.lowBatteryWarningLevel = 10;
@@ -147,7 +152,7 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
 
       this.plantSensorService = new PlantSensor(this.name);
 
-      this.fakeGatoHistoryService = new fakegato(this.api)('room', this, { storage: 'fs' });
+      this.fakeGatoHistoryService = new fakegato(this.api)('room', this, {storage: 'fs'});
 
       // Setup services
       this._setUpServices();
@@ -258,13 +263,12 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
       }
 
       /*
-            own characteristics and services
-        */
+              own characteristics and services
+          */
       this.plantSensorService
         .getCharacteristic(SoilMoisture)
         .onGet(this.getCurrentMoisture.bind(this));
-      this.plantSensorService.
-        getCharacteristic(SoilFertility)
+      this.plantSensorService.getCharacteristic(SoilFertility)
         .onGet(this.getCurrentFertility.bind(this));
     }
 
@@ -293,19 +297,18 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
       this.humidityService.updateCharacteristic(Characteristic.StatusActive, true);
 
       if (this.humidityAlert && this.humidityAlertService) {
-        this.humidityAlertService.updateCharacteristic(
-          Characteristic.ContactSensorState,
-          moisture <= this.humidityAlertLevel ? Characteristic.ContactSensorState.CONTACT_NOT_DETECTED : Characteristic.ContactSensorState.CONTACT_DETECTED,
-        );
-        this.humidityAlertService.updateCharacteristic(Characteristic.StatusActive, true);
+        const alert = moisture <= this.humidityAlertLevel ?
+          Characteristic.ContactSensorState.CONTACT_NOT_DETECTED :
+          Characteristic.ContactSensorState.CONTACT_DETECTED;
+        this.humidityAlertService.updateCharacteristic(Characteristic.ContactSensorState, alert);
         this.humidityAlertService.updateCharacteristic(Characteristic.StatusActive, true);
       }
 
       if (this.lowLightAlert && this.lowLightAlertService) {
-        this.lowLightAlertService.updateCharacteristic(
-          Characteristic.ContactSensorState,
-          lux <= this.lowLightAlertLevel ? Characteristic.ContactSensorState.CONTACT_NOT_DETECTED : Characteristic.ContactSensorState.CONTACT_DETECTED,
-        );
+        const alert = lux <= this.lowLightAlertLevel ?
+          Characteristic.ContactSensorState.CONTACT_NOT_DETECTED :
+          Characteristic.ContactSensorState.CONTACT_DETECTED;
+        this.lowLightAlertService.updateCharacteristic(Characteristic.ContactSensorState, alert);
         this.lowLightAlertService.updateCharacteristic(Characteristic.StatusActive, true);
       }
     }
@@ -320,39 +323,25 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
       // Update values
       this.informationService.updateCharacteristic(Characteristic.FirmwareRevision, firmware);
 
+      const batteryAlert = battery <= this.lowBatteryWarningLevel ?
+        Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW :
+        Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL;
+
       this.batteryService.updateCharacteristic(Characteristic.BatteryLevel, battery);
-      this.batteryService.updateCharacteristic(
-        Characteristic.StatusLowBattery,
-        battery <= this.lowBatteryWarningLevel ? Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW : Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL,
-      );
+      this.batteryService.updateCharacteristic(Characteristic.StatusLowBattery, batteryAlert);
 
-      this.lightService.updateCharacteristic(
-        Characteristic.StatusLowBattery,
-        battery <= this.lowBatteryWarningLevel ? Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW : Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL,
-      );
+      this.lightService.updateCharacteristic(Characteristic.StatusLowBattery, batteryAlert);
 
-      this.tempService.updateCharacteristic(
-        Characteristic.StatusLowBattery,
-        battery <= this.lowBatteryWarningLevel ? Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW : Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL,
-      );
+      this.tempService.updateCharacteristic(Characteristic.StatusLowBattery, batteryAlert);
 
-      this.humidityService.updateCharacteristic(
-        Characteristic.StatusLowBattery,
-        battery <= this.lowBatteryWarningLevel ? Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW : Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL,
-      );
+      this.humidityService.updateCharacteristic(Characteristic.StatusLowBattery, batteryAlert);
 
       if (this.humidityAlert && this.humidityAlertService) {
-        this.humidityAlertService.updateCharacteristic(
-          Characteristic.StatusLowBattery,
-          battery <= this.lowBatteryWarningLevel ? Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW : Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL,
-        );
+        this.humidityAlertService.updateCharacteristic(Characteristic.StatusLowBattery, batteryAlert);
       }
 
       if (this.lowLightAlert && this.lowLightAlertService) {
-        this.lowLightAlertService.updateCharacteristic(
-          Characteristic.StatusLowBattery,
-          battery <= this.lowBatteryWarningLevel ? Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW : Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL,
-        );
+        this.lowLightAlertService.updateCharacteristic(Characteristic.StatusLowBattery, batteryAlert);
       }
     }
 
@@ -413,7 +402,9 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
 
     async getStatusLowBattery(): Promise<CharacteristicValue> {
       if (this.storedData.firmware) {
-        return this.storedData.firmware.batteryLevel <= 20 ? Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW : Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL;
+        return this.storedData.firmware.batteryLevel <= 20 ?
+          Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW :
+          Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL;
       } else {
         return Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL;
       }
@@ -421,7 +412,9 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
 
     async getStatusLowMoisture(): Promise<CharacteristicValue> {
       if (this.storedData.data) {
-        return this.storedData.data.moisture <= this.humidityAlertLevel ? Characteristic.ContactSensorState.CONTACT_NOT_DETECTED : Characteristic.ContactSensorState.CONTACT_DETECTED;
+        return this.storedData.data.moisture <= this.humidityAlertLevel ?
+          Characteristic.ContactSensorState.CONTACT_NOT_DETECTED :
+          Characteristic.ContactSensorState.CONTACT_DETECTED;
       } else {
         return Characteristic.ContactSensorState.CONTACT_DETECTED;
       }
@@ -429,7 +422,9 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
 
     async getStatusLowLight(): Promise<CharacteristicValue> {
       if (this.storedData.data) {
-        return this.storedData.data.lux <= this.lowLightAlertLevel ? Characteristic.ContactSensorState.CONTACT_NOT_DETECTED : Characteristic.ContactSensorState.CONTACT_DETECTED;
+        return this.storedData.data.lux <= this.lowLightAlertLevel ?
+          Characteristic.ContactSensorState.CONTACT_NOT_DETECTED :
+          Characteristic.ContactSensorState.CONTACT_DETECTED;
       } else {
         return Characteristic.ContactSensorState.CONTACT_DETECTED;
       }
