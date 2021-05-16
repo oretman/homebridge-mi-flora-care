@@ -1,63 +1,26 @@
-import {API, Logger, CharacteristicValue, AccessoryPlugin, AccessoryConfig} from 'homebridge';
-import {Characteristic, Service, Perms, Formats, Units} from 'hap-nodejs';
+import {
+  API,
+  Logger,
+  Service,
+  Characteristic,
+  CharacteristicValue,
+  Formats,
+  Perms,
+  Units,
+  AccessoryPlugin,
+  AccessoryConfig,
+} from 'homebridge';
+// import {Characteristic, Service, Perms, Formats, Units} from 'hap-nodejs';
 import os from 'os';
 import fakegato from 'fakegato-history';
 import MiFlora from 'miflora';
 
 const hostname = os.hostname();
 
-/*
-    own characteristics and services
-*/
-
-// moisture characteristic
-class SoilMoisture extends Characteristic {
-    static readonly UUID: string = 'C160D589-9510-4432-BAA6-5D9D77957138';
-
-    constructor() {
-      super('SoilMoisture', SoilMoisture.UUID, {
-        format: Formats.UINT8,
-        unit: Units.PERCENTAGE,
-        maxValue: 100,
-        minValue: 0,
-        minStep: 0.1,
-        perms: [Perms.READ, Perms.NOTIFY],
-      });
-      this.value = this.getDefaultValue();
-    }
-}
-
-// fertility characteristic
-class SoilFertility extends Characteristic {
-    static readonly UUID: string = '0029260E-B09C-4FD7-9E60-2C60F1250618';
-
-    constructor() {
-      super('SoilFertility', SoilFertility.UUID, {
-        format: Formats.UINT8,
-        maxValue: 10000,
-        minValue: 0,
-        minStep: 1,
-        perms: [Perms.READ, Perms.NOTIFY],
-      });
-      this.value = this.getDefaultValue();
-    }
-}
-
-// moisture sensor
-class PlantSensor extends Service {
-    static UUID = '3C233958-B5C4-4218-A0CD-60B8B971AA0A';
-
-    constructor(displayName: string, subtype?: string) {
-      super(displayName, PlantSensor.UUID, subtype);
-      // Required Characteristics
-      this.addCharacteristic(SoilMoisture);
-      // Optional Characteristics
-      this.addOptionalCharacteristic(Characteristic.CurrentTemperature);
-      this.addOptionalCharacteristic(SoilFertility);
-    }
-}
+let HapCharacteristic: typeof Characteristic;
 
 export class MiFloraCareAccessory implements AccessoryPlugin {
+    private readonly Service: typeof Service;
     private readonly Characteristic: typeof Characteristic;
 
     private readonly informationService: Service;
@@ -69,6 +32,7 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
     private readonly lowLightAlertService: Service | null;
     // eslint-disable-next-line  @typescript-eslint/no-explicit-any
     private readonly fakeGatoHistoryService: any;
+
     private readonly plantSensorService: Service;
 
     private readonly name: string;
@@ -95,8 +59,9 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
       this.config = config;
       this.api = api;
 
-      // this.Service = this.api.hap.Service;
+      this.Service = this.api.hap.Service;
       this.Characteristic = this.api.hap.Characteristic;
+      HapCharacteristic = this.api.hap.Characteristic;
 
       // extract name from config
       this.name = config.name || 'MiFlora';
@@ -135,27 +100,14 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
         this.lowBatteryWarningLevel = 10;
       }
 
-      this.informationService = new this.api.hap.Service.AccessoryInformation();
-      this.batteryService = new this.api.hap.Service.Battery(this.name);
-      this.lightService = new this.api.hap.Service.LightSensor(this.name);
-      this.tempService = new this.api.hap.Service.TemperatureSensor(this.name);
-      this.humidityService = new this.api.hap.Service.HumiditySensor(this.name);
-
-      this.humidityAlertService = null;
-      if (this.humidityAlert) {
-        this.humidityAlertService = new this.api.hap.Service.ContactSensor(this.name + ' Low Humidity', 'humidity');
-      }
-      this.lowLightAlertService = null;
-      if (this.lowLightAlert) {
-        this.lowLightAlertService = new this.api.hap.Service.ContactSensor(this.name + ' Low Light', 'light');
-      }
-
-      this.plantSensorService = new PlantSensor(this.name);
-
-      this.fakeGatoHistoryService = new fakegato(this.api)('room', this, {storage: 'fs'});
-
       // Setup services
-      this._setUpServices();
+      this.informationService = this._createInformationService();
+      this.batteryService = this._createBatteryService();
+      this.tempService = this._createTemperatureService();
+      [this.lightService, this.lowLightAlertService] = this._createLightService();
+      [this.humidityService, this.humidityAlertService] = this._createHumidityService();
+      this.plantSensorService = this._createPlantService();
+      this.fakeGatoHistoryService = this._createFakeGatoHistoryService();
 
       this._refreshInfo();
 
@@ -189,87 +141,192 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
       return services;
     }
 
-    private _setUpServices() {
-      // info service
-      this.informationService
-        .setCharacteristic(this.api.hap.Characteristic.Manufacturer, this.config.manufacturer || 'Xiaomi')
-        .setCharacteristic(this.api.hap.Characteristic.Model, this.config.model || 'Flower Care')
-        .setCharacteristic(this.api.hap.Characteristic.SerialNumber, this.config.serial || hostname + '-' + this.name);
-      this.informationService
-        .getCharacteristic(this.api.hap.Characteristic.FirmwareRevision)
-        .onGet(this.getFirmwareRevision.bind(this));
+    /**
+     * own characteristics and services
+     *
+     * @returns Service
+     */
+    private _createPlantService(): Service {
+      // moisture characteristic
+      class SoilMoisture extends this.Characteristic {
+            static readonly UUID: string = 'C160D589-9510-4432-BAA6-5D9D77957138';
 
-      this.batteryService
-        .getCharacteristic(this.api.hap.Characteristic.BatteryLevel)
-        .onGet(this.getBatteryLevel.bind(this));
-      this.batteryService
-        .setCharacteristic(this.api.hap.Characteristic.ChargingState, Characteristic.ChargingState.NOT_CHARGEABLE);
-      this.batteryService
-        .getCharacteristic(this.api.hap.Characteristic.StatusLowBattery)
-        .onGet(this.getStatusLowBattery.bind(this));
-
-      this.lightService
-        .getCharacteristic(this.api.hap.Characteristic.CurrentAmbientLightLevel)
-        .onGet(this.getCurrentAmbientLightLevel.bind(this));
-      this.lightService
-        .getCharacteristic(this.api.hap.Characteristic.StatusLowBattery)
-        .onGet(this.getStatusLowBattery.bind(this));
-      this.lightService
-        .getCharacteristic(this.api.hap.Characteristic.StatusActive)
-        .onGet(this.getStatusActive.bind(this));
-
-      this.tempService
-        .getCharacteristic(this.api.hap.Characteristic.CurrentTemperature)
-        .onGet(this.getCurrentTemperature.bind(this));
-      this.tempService
-        .getCharacteristic(this.api.hap.Characteristic.StatusLowBattery)
-        .onGet(this.getStatusLowBattery.bind(this));
-      this.tempService
-        .getCharacteristic(this.api.hap.Characteristic.StatusActive)
-        .onGet(this.getStatusActive.bind(this));
-
-      this.humidityService
-        .getCharacteristic(this.api.hap.Characteristic.CurrentRelativeHumidity)
-        .onGet(this.getCurrentMoisture.bind(this));
-      this.humidityService
-        .getCharacteristic(this.api.hap.Characteristic.StatusLowBattery)
-        .onGet(this.getStatusLowBattery.bind(this));
-      this.humidityService
-        .getCharacteristic(this.api.hap.Characteristic.StatusActive)
-        .onGet(this.getStatusActive.bind(this));
-
-      if (this.humidityAlert && this.humidityAlertService) {
-        this.humidityAlertService
-          .getCharacteristic(this.api.hap.Characteristic.ContactSensorState)
-          .onGet(this.getStatusLowMoisture.bind(this));
-        this.humidityAlertService
-          .getCharacteristic(this.api.hap.Characteristic.StatusLowBattery)
-          .onGet(this.getStatusLowBattery.bind(this));
-        this.humidityAlertService
-          .getCharacteristic(this.api.hap.Characteristic.StatusActive)
-          .onGet(this.getStatusActive.bind(this));
+            constructor() {
+              super('SoilMoisture', SoilMoisture.UUID, {
+                format: Formats.UINT8,
+                unit: Units.PERCENTAGE,
+                maxValue: 100,
+                minValue: 0,
+                minStep: 0.1,
+                perms: [Perms.PAIRED_READ, Perms.NOTIFY],
+              });
+              this.value = this.getDefaultValue();
+            }
       }
 
-      if (this.lowLightAlert && this.lowLightAlertService) {
-        this.lowLightAlertService
-          .getCharacteristic(this.api.hap.Characteristic.ContactSensorState)
-          .onGet(this.getStatusLowLight.bind(this));
-        this.lowLightAlertService
-          .getCharacteristic(this.api.hap.Characteristic.StatusLowBattery)
-          .onGet(this.getStatusLowBattery.bind(this));
-        this.lowLightAlertService
-          .getCharacteristic(this.api.hap.Characteristic.StatusActive)
-          .onGet(this.getStatusActive.bind(this));
+      // fertility characteristic
+      class SoilFertility extends this.Characteristic {
+            static readonly UUID: string = '0029260E-B09C-4FD7-9E60-2C60F1250618';
+
+            constructor() {
+              super('SoilFertility', SoilFertility.UUID, {
+                format: Formats.UINT8,
+                maxValue: 10000,
+                minValue: 0,
+                minStep: 1,
+                perms: [Perms.PAIRED_READ, Perms.NOTIFY],
+              });
+              this.value = this.getDefaultValue();
+            }
       }
 
-      /*
-              own characteristics and services
-          */
-      this.plantSensorService
+      // moisture sensor
+      class PlantSensor extends this.Service {
+            static UUID = '3C233958-B5C4-4218-A0CD-60B8B971AA0A';
+
+            constructor(displayName: string, subtype?: string) {
+              super(displayName, PlantSensor.UUID, subtype);
+              // Required Characteristics
+              this.addCharacteristic(SoilMoisture);
+              // Optional Characteristics
+              this.addOptionalCharacteristic(HapCharacteristic.CurrentTemperature);
+              this.addOptionalCharacteristic(SoilFertility);
+            }
+      }
+
+      const plantSensorService = new PlantSensor(this.name);
+
+      plantSensorService
         .getCharacteristic(SoilMoisture)
         .onGet(this.getCurrentMoisture.bind(this));
-      this.plantSensorService.getCharacteristic(SoilFertility)
+      plantSensorService
+        .getCharacteristic(SoilFertility)
         .onGet(this.getCurrentFertility.bind(this));
+
+      return plantSensorService;
+    }
+
+    private _createInformationService(): Service {
+
+      const informationService = new this.Service.AccessoryInformation();
+
+      informationService
+        .setCharacteristic(this.Characteristic.Manufacturer, this.config.manufacturer || 'Xiaomi')
+        .setCharacteristic(this.Characteristic.Model, this.config.model || 'Flower Care')
+        .setCharacteristic(this.Characteristic.SerialNumber, this.config.serial || hostname + '-' + this.name);
+      informationService
+        .getCharacteristic(this.Characteristic.FirmwareRevision)
+        .onGet(this.getFirmwareRevision.bind(this));
+
+      return informationService;
+    }
+
+    private _createBatteryService(): Service {
+      const batteryService = new this.Service.Battery(this.name);
+      batteryService
+        .getCharacteristic(this.Characteristic.BatteryLevel)
+        .onGet(this.getBatteryLevel.bind(this));
+      batteryService
+        .setCharacteristic(this.Characteristic.ChargingState, this.Characteristic.ChargingState.NOT_CHARGEABLE);
+      batteryService
+        .getCharacteristic(this.Characteristic.StatusLowBattery)
+        .onGet(this.getStatusLowBattery.bind(this));
+
+      return batteryService;
+    }
+
+    private _createTemperatureService(): Service {
+
+      const tempService = new this.Service.TemperatureSensor(this.name);
+
+      tempService
+        .getCharacteristic(this.Characteristic.CurrentTemperature)
+        .onGet(this.getCurrentTemperature.bind(this));
+      tempService
+        .getCharacteristic(this.Characteristic.StatusLowBattery)
+        .onGet(this.getStatusLowBattery.bind(this));
+      tempService
+        .getCharacteristic(this.Characteristic.StatusActive)
+        .onGet(this.getStatusActive.bind(this));
+
+      return tempService;
+
+    }
+
+    private _createLightService(): Array<Service> {
+      const lightService = new this.Service.LightSensor(this.name);
+
+      lightService
+        .getCharacteristic(this.Characteristic.CurrentAmbientLightLevel)
+        .onGet(this.getCurrentAmbientLightLevel.bind(this));
+      lightService
+        .getCharacteristic(this.Characteristic.StatusLowBattery)
+        .onGet(this.getStatusLowBattery.bind(this));
+      lightService
+        .getCharacteristic(this.Characteristic.StatusActive)
+        .onGet(this.getStatusActive.bind(this));
+
+
+      let lowLightAlertService;
+      if (this.lowLightAlert) {
+        lowLightAlertService = new this.Service.ContactSensor(this.name + ' Low Light', 'light');
+        lowLightAlertService
+          .getCharacteristic(this.Characteristic.ContactSensorState)
+          .onGet(this.getStatusLowLight.bind(this));
+        lowLightAlertService
+          .getCharacteristic(this.Characteristic.StatusLowBattery)
+          .onGet(this.getStatusLowBattery.bind(this));
+        lowLightAlertService
+          .getCharacteristic(this.Characteristic.StatusActive)
+          .onGet(this.getStatusActive.bind(this));
+      } else {
+        lowLightAlertService = null;
+      }
+
+      return [
+        lightService,
+        lowLightAlertService,
+      ];
+    }
+
+    private _createHumidityService(): Array<Service> {
+      const humidityService = new this.Service.HumiditySensor(this.name);
+
+      humidityService
+        .getCharacteristic(this.Characteristic.CurrentRelativeHumidity)
+        .onGet(this.getCurrentMoisture.bind(this));
+      humidityService
+        .getCharacteristic(this.Characteristic.StatusLowBattery)
+        .onGet(this.getStatusLowBattery.bind(this));
+      humidityService
+        .getCharacteristic(this.Characteristic.StatusActive)
+        .onGet(this.getStatusActive.bind(this));
+
+
+      let humidityAlertService;
+      if (this.humidityAlert) {
+        humidityAlertService = new this.api.hap.Service.ContactSensor(this.name + ' Low Humidity', 'humidity');
+        humidityAlertService
+          .getCharacteristic(this.Characteristic.ContactSensorState)
+          .onGet(this.getStatusLowMoisture.bind(this));
+        humidityAlertService
+          .getCharacteristic(this.Characteristic.StatusLowBattery)
+          .onGet(this.getStatusLowBattery.bind(this));
+        humidityAlertService
+          .getCharacteristic(this.Characteristic.StatusActive)
+          .onGet(this.getStatusActive.bind(this));
+      } else {
+        humidityAlertService = null;
+      }
+
+      return [
+        humidityService,
+        humidityAlertService,
+      ];
+    }
+
+    private _createFakeGatoHistoryService(): Service {
+      return new fakegato(this.api)('room', this, {storage: 'fs'});
     }
 
     private _updateData({temperature, lux, moisture, fertility}) {
@@ -287,29 +344,29 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
         humidity: moisture,
       });
 
-      this.lightService.updateCharacteristic(Characteristic.CurrentAmbientLightLevel, lux);
-      this.lightService.updateCharacteristic(Characteristic.StatusActive, true);
+      this.lightService.updateCharacteristic(this.Characteristic.CurrentAmbientLightLevel, lux);
+      this.lightService.updateCharacteristic(this.Characteristic.StatusActive, true);
 
-      this.tempService.updateCharacteristic(Characteristic.CurrentTemperature, temperature);
-      this.tempService.updateCharacteristic(Characteristic.StatusActive, true);
+      this.tempService.updateCharacteristic(this.Characteristic.CurrentTemperature, temperature);
+      this.tempService.updateCharacteristic(this.Characteristic.StatusActive, true);
 
-      this.humidityService.updateCharacteristic(Characteristic.CurrentRelativeHumidity, moisture);
-      this.humidityService.updateCharacteristic(Characteristic.StatusActive, true);
+      this.humidityService.updateCharacteristic(this.Characteristic.CurrentRelativeHumidity, moisture);
+      this.humidityService.updateCharacteristic(this.Characteristic.StatusActive, true);
 
       if (this.humidityAlert && this.humidityAlertService) {
         const alert = moisture <= this.humidityAlertLevel ?
-          Characteristic.ContactSensorState.CONTACT_NOT_DETECTED :
-          Characteristic.ContactSensorState.CONTACT_DETECTED;
-        this.humidityAlertService.updateCharacteristic(Characteristic.ContactSensorState, alert);
-        this.humidityAlertService.updateCharacteristic(Characteristic.StatusActive, true);
+          this.Characteristic.ContactSensorState.CONTACT_NOT_DETECTED :
+          this.Characteristic.ContactSensorState.CONTACT_DETECTED;
+        this.humidityAlertService.updateCharacteristic(this.Characteristic.ContactSensorState, alert);
+        this.humidityAlertService.updateCharacteristic(this.Characteristic.StatusActive, true);
       }
 
       if (this.lowLightAlert && this.lowLightAlertService) {
         const alert = lux <= this.lowLightAlertLevel ?
-          Characteristic.ContactSensorState.CONTACT_NOT_DETECTED :
-          Characteristic.ContactSensorState.CONTACT_DETECTED;
-        this.lowLightAlertService.updateCharacteristic(Characteristic.ContactSensorState, alert);
-        this.lowLightAlertService.updateCharacteristic(Characteristic.StatusActive, true);
+          this.Characteristic.ContactSensorState.CONTACT_NOT_DETECTED :
+          this.Characteristic.ContactSensorState.CONTACT_DETECTED;
+        this.lowLightAlertService.updateCharacteristic(this.Characteristic.ContactSensorState, alert);
+        this.lowLightAlertService.updateCharacteristic(this.Characteristic.StatusActive, true);
       }
     }
 
@@ -321,27 +378,27 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
       };
 
       // Update values
-      this.informationService.updateCharacteristic(Characteristic.FirmwareRevision, firmware);
+      this.informationService.updateCharacteristic(this.Characteristic.FirmwareRevision, firmware);
 
       const batteryAlert = battery <= this.lowBatteryWarningLevel ?
-        Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW :
-        Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL;
+        this.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW :
+        this.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL;
 
-      this.batteryService.updateCharacteristic(Characteristic.BatteryLevel, battery);
-      this.batteryService.updateCharacteristic(Characteristic.StatusLowBattery, batteryAlert);
+      this.batteryService.updateCharacteristic(this.Characteristic.BatteryLevel, battery);
+      this.batteryService.updateCharacteristic(this.Characteristic.StatusLowBattery, batteryAlert);
 
-      this.lightService.updateCharacteristic(Characteristic.StatusLowBattery, batteryAlert);
+      this.lightService.updateCharacteristic(this.Characteristic.StatusLowBattery, batteryAlert);
 
-      this.tempService.updateCharacteristic(Characteristic.StatusLowBattery, batteryAlert);
+      this.tempService.updateCharacteristic(this.Characteristic.StatusLowBattery, batteryAlert);
 
-      this.humidityService.updateCharacteristic(Characteristic.StatusLowBattery, batteryAlert);
+      this.humidityService.updateCharacteristic(this.Characteristic.StatusLowBattery, batteryAlert);
 
       if (this.humidityAlert && this.humidityAlertService) {
-        this.humidityAlertService.updateCharacteristic(Characteristic.StatusLowBattery, batteryAlert);
+        this.humidityAlertService.updateCharacteristic(this.Characteristic.StatusLowBattery, batteryAlert);
       }
 
       if (this.lowLightAlert && this.lowLightAlertService) {
-        this.lowLightAlertService.updateCharacteristic(Characteristic.StatusLowBattery, batteryAlert);
+        this.lowLightAlertService.updateCharacteristic(this.Characteristic.StatusLowBattery, batteryAlert);
       }
     }
 
@@ -403,30 +460,30 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
     async getStatusLowBattery(): Promise<CharacteristicValue> {
       if (this.storedData.firmware) {
         return this.storedData.firmware.batteryLevel <= 20 ?
-          Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW :
-          Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL;
+          this.Characteristic.StatusLowBattery.BATTERY_LEVEL_LOW :
+          this.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL;
       } else {
-        return Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL;
+        return this.Characteristic.StatusLowBattery.BATTERY_LEVEL_NORMAL;
       }
     }
 
     async getStatusLowMoisture(): Promise<CharacteristicValue> {
       if (this.storedData.data) {
         return this.storedData.data.moisture <= this.humidityAlertLevel ?
-          Characteristic.ContactSensorState.CONTACT_NOT_DETECTED :
-          Characteristic.ContactSensorState.CONTACT_DETECTED;
+          this.Characteristic.ContactSensorState.CONTACT_NOT_DETECTED :
+          this.Characteristic.ContactSensorState.CONTACT_DETECTED;
       } else {
-        return Characteristic.ContactSensorState.CONTACT_DETECTED;
+        return this.Characteristic.ContactSensorState.CONTACT_DETECTED;
       }
     }
 
     async getStatusLowLight(): Promise<CharacteristicValue> {
       if (this.storedData.data) {
         return this.storedData.data.lux <= this.lowLightAlertLevel ?
-          Characteristic.ContactSensorState.CONTACT_NOT_DETECTED :
-          Characteristic.ContactSensorState.CONTACT_DETECTED;
+          this.Characteristic.ContactSensorState.CONTACT_NOT_DETECTED :
+          this.Characteristic.ContactSensorState.CONTACT_DETECTED;
       } else {
-        return Characteristic.ContactSensorState.CONTACT_DETECTED;
+        return this.Characteristic.ContactSensorState.CONTACT_DETECTED;
       }
     }
 
