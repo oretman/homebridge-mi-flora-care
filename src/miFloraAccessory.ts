@@ -65,7 +65,7 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
       this.name = config.name || 'MiFlora';
       this.displayName = this.name;
       this.deviceId = config.deviceId;
-      this.interval = Math.min(Math.max(config.interval, 1), 600);
+      this.interval = typeof config.interval === 'undefined' ? 1800 : config.interval;
       this.storedData = {};
 
       // MiFLora scan input
@@ -107,10 +107,12 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
       this.plantSensorService = this._createPlantService();
       this.fakeGatoHistoryService = this._createFakeGatoHistoryService();
 
+      this.log.debug('First Scan');
       this._refreshInfo();
 
       setInterval(() => {
         // Start scanning for updates, these will arrive in the corresponding callbacks
+        this.log.debug('Interval Scan');
         this._refreshInfo();
 
       }, this.interval * 1000);
@@ -431,9 +433,12 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
           // }
           this._updateData(data.sensorValues);
           this._updateFirmware(data.firmwareInfo);
+          await device.disconnect();
         } catch (e) {
-          this.log.debug(e);
+          this.log.error(e);
         }
+      } else {
+        this.log.info('No devide found');
       }
     }
 
