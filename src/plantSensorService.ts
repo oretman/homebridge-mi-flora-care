@@ -39,7 +39,7 @@ export const plantSensorService = (api: API): typeof PlantSensor => {
 
         constructor() {
           super('SoilFertility', SoilFertility.UUID, {
-            format: Formats.UINT8,
+            format: Formats.UINT16,
             maxValue: 10000,
             minValue: 0,
             minStep: 1,
