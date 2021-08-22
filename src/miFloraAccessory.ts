@@ -70,7 +70,7 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
 
       // MiFLora scan input
       this._opts = {
-        duration: 15000,
+        duration: 30000, // previous value was 15sec. 
         ignoreUnknown: true,
         addresses: [this.deviceId.toLowerCase()],
       };
