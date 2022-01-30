@@ -285,6 +285,11 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
     }
 
     private _updateData({temperature, lux, moisture, fertility}) {
+      // Homebridge throws an error if the emitted characteristic value is below 0.0001
+      if (lux < 0.0001) {
+        lux = 0.0001;
+      }
+      
       this.log.info('Lux: %s, Temperature: %s, Moisture: %s, Fertility: %s', lux, temperature, moisture, fertility);
       this.storedData.data = {
         temperature,
@@ -485,19 +490,19 @@ export class MiFloraCareAccessory implements AccessoryPlugin {
     }
 
     async getCurrentAmbientLightLevel(): Promise<CharacteristicValue> {
-      return this.storedData.data ? this.storedData.data.lux : 0;
+      return this.storedData.data ? this.storedData.data.lux : 0.0001;
     }
 
     async getCurrentTemperature(): Promise<CharacteristicValue> {
-      return this.storedData.data ? this.storedData.data.temperature : 0;
+      return this.storedData.data ? this.storedData.data.temperature : 0.0001;
     }
 
     async getCurrentMoisture(): Promise<CharacteristicValue> {
-      return this.storedData.data ? this.storedData.data.moisture : 0;
+      return this.storedData.data ? this.storedData.data.moisture : 0.0001;
     }
 
     async getCurrentFertility(): Promise<CharacteristicValue> {
-      return this.storedData.data ? this.storedData.data.fertility : 0;
+      return this.storedData.data ? this.storedData.data.fertility : 0.0001;
     }
 
 }
